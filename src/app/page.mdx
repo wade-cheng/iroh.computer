@@ -13,8 +13,9 @@ import {WrenchCodeIcon} from '@/components/icons/WrenchCodeIcon';
 import {PerfChartIllustration} from '@/components/PerfChartIllustration';
 import {ConnectDevicesIllustration} from '@/components/ConnectDevicesIllustration';
 import {ProtocolHeroList} from '@/components/ProtocolHeroList';
+import {LogoCloud} from '@/components/LogoCloud';
 
-import logoRust from '@/images/logos/rust.svg';
+import logoRust from '@/images/language-logos/rust.svg';
 
 export const metadata = {
   title: 'Iroh',
@@ -65,6 +66,8 @@ export const metadata = {
         <p className=''>- <a className='text-irohPurple-500' href="https://a.weird.one/">weird.one</a></p>
       </div>
     </section>
+
+    <LogoCloud />
 
     {/* iroh protocols */}
     <section className='pt-10 pb-16 border border-irohGray-300 dark:border-irohGray-800'>
@@ -137,56 +140,27 @@ export const metadata = {
         <CodeGroup title="main.rs">
 
 ```rust {{ title: 'rust' }}
-use std::{env, str::FromStr};
+// a program that creates two endpoints & sends a ping between them
+use anyhow::Result;
+use iroh::{Endpoint, protocol::Router};
+use iroh_ping::{ALPN as PingALPN, Ping};
 
-use iroh::base::ticket::BlobTicket;
-use iroh::node::Node;
-
-// serve & fetch data with iroh, from any two devices in the world
-// run this example from any two computers, and iroh will connect them!
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // create a new node with default protocols
-    let node = Node::memory().spawn().await?;
+async fn main() -> Result<()> {
+    // create the receive side
+    let recv_ep = Endpoint::builder().discovery_n0().bind().await?;
+    let recv_router = Router::builder(recv_ep)
+        .accept(PingALPN, Ping::new())
+        .spawn();
 
-    // Choose between client & server roles based on a download argument
-    if let Some(ticket) = env::args().collect::<Vec<String>>().get(1) {
-        // we have a download argument. Fetch some data!
-        let ticket = BlobTicket::from_str(&ticket).expect("failed to parse blob ticket");
+    let addr = recv_router.endpoint().node_addr().await?;
 
-        let response = node
-            .blobs()
-            .download(ticket.hash(), ticket.node_addr().clone())
-            .await?
-            .await
-            .expect("unable to download hash");
+    // create a send side & send a ping
+    let send_ep = Endpoint::builder().discovery_n0().bind().await?;
+    let send_pinger = Ping::new();
+    send_pinger.ping(&send_ep, addr).await?;
 
-        println!(
-            "downloaded {} bytes from node {}",
-            response.downloaded_size,
-            ticket.node_addr().node_id
-        );
-
-        let bytes = node.blobs().read_to_bytes(ticket.hash()).await?;
-        let s = std::str::from_utf8(&bytes).expect("unable to parse blob as as utf-8 string");
-        println!("{s}");
-    } else {
-        // no download argumnt, serve some data that says "Hello, world!"
-        let res = node.blobs().add_bytes("Hello, world!").await?;
-
-        // create a "ticket" for sharing data with a peer
-        let ticket = node
-            .blobs()
-            .share(res.hash, res.format, Default::default())
-            .await?;
-
-        // print the ticket, containing all the above information
-        println!("Serving data! In another terminal, run:");
-        println!("cargo run --example hello {}", ticket);
-        tokio::signal::ctrl_c().await?;
-        node.shutdown().await?;
-    }
-
+    // ok!
     Ok(())
 }
 
